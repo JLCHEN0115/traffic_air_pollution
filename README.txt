@@ -196,6 +196,13 @@ The following VC codes is inferred by data matching. See the testing code for mo
 # class_14 is User-Def
 # class_15 is Unknown
 
+
+observations with total_flow with 0 are removed in processing the data.
+
+observations with freeway_ID = 944 are removed.
+
+Observation with multiple LRS segments or relevant LINESTRING are removed. (deal with this in future version!)
+
 =====================================================================================
 CA State Highway Network linear referencing system (LRS)
 https://gisdata-caltrans.opendata.arcgis.com/datasets/77f2d7ba94e040a78bfbe36feb6279da_0/about

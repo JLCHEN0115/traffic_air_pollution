@@ -11,12 +11,12 @@ pacman::p_load(
 )
 
 # TAMS Data Specs 
-column_widths_vcr <- c(1, 2, 6, 1, 1, 2, 2, 2, 2, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5)
-column_names_vcr <- c("Record_Type", "State_FIPS", "Station_ID", "Direction", "Lane", 
-                      "Year", "Month", "Day", "Hour", "Total_Volume", 
-                      "FHWA1", "FHWA2", "FHWA3", "FHWA4", "FHWA5", "FHWA6", "FHWA7",
-                      "FHWA8", "FHWA9", "FHWA10", "FHWA11", "FHWA12", "FHWA13", 
-                      "FHWA14", "FHWA15")
+# column_widths_vcr <- c(1, 2, 6, 1, 1, 2, 2, 2, 2, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5)
+# column_names_vcr <- c("Record_Type", "State_FIPS", "Station_ID", "Direction", "Lane", 
+#                      "Year", "Month", "Day", "Hour", "Total_Volume", 
+#                      "FHWA1", "FHWA2", "FHWA3", "FHWA4", "FHWA5", "FHWA6", "FHWA7",
+#                      "FHWA8", "FHWA9", "FHWA10", "FHWA11", "FHWA12", "FHWA13", 
+#                      "FHWA14", "FHWA15")
 
 # ==============================================================================
 # Helper Function to Get Point from LRS (for PeMS census data)
@@ -60,7 +60,7 @@ get_point_from_lrs <- function(station_info, lrs_data) {
     
     if (nrow(seg) == 0) {
        warning(paste("No LRS segment found for substation:", station_info$substation_ID,
-                     "Route:", route, "APM:", target_apm, "Dir:", direction))
+                     "Route:", route, "APM:", target_apm, "Dir:", direction), " - giving NULL")
       return(NULL)
     } else {
       # If multiple boundary matches, take the first one
@@ -73,8 +73,8 @@ get_point_from_lrs <- function(station_info, lrs_data) {
     if (nrow(seg) > 1) {
       # Reduced warning frequency
        warning(paste("Multiple LRS segments found for substation:", station_info$substation_ID, 
-                    "- using first match."))
-      seg <- seg %>% slice(1)
+                    "- giving NULL."))
+      return(NULL)
     }
     # Calculate fraction along the segment
     denominator <- seg$eOdometer - seg$bOdometer
@@ -88,14 +88,21 @@ get_point_from_lrs <- function(station_info, lrs_data) {
   
   # Process geometry
   geom <- st_geometry(seg) %>%
-    st_line_merge() %>%
-    st_cast("LINESTRING") # Ensure it's a single linestring
+    st_line_merge() %>%   # try to merge the MULTILINESTRING to LINESTRING
+    st_cast("LINESTRING") # Convert to single linestring
+  
+  # we may have multiple linestrings
+  # Current version: return NULL
+  # Possible ways to go: snap and merge / further locate the relevant linestring
+  if (length(geom) > 1) {
+    warning(paste("Multiple LINESTRINGS found for", station_info$substation_ID, "- giving NULL"))
+    return(NULL) 
+  }
   
   # Use tryCatch for st_line_sample issues like invalid fraction
   pt <- tryCatch({
     # Ensure frac is valid before sampling
     if (!is.finite(frac) || frac < 0 || frac > 1) {
-      # Reduced warning frequency
        warning(paste("Calculated fraction invalid for substation:", station_info$substation_ID, "Frac:", frac))
       return(NULL) 
     }
@@ -119,49 +126,38 @@ get_point_from_lrs <- function(station_info, lrs_data) {
 }
 
 # ==============================================================================
-# PeMS Census Truck Data 
+# PeMS Census VC Data 
 # ==============================================================================
 
-col_names_census <- c("time", "station_ID", "substation_ID", "freeway_ID", 
-                      "freeway_direction", "city_ID", "county_ID", "district_ID",
-                      "abs_postmile", "station_type", "station_set_ID", "lane", 
-                      "vehicle_class", "vehicle_count", "avg_speed", "violation_count",
-                      "violation_code", "single_axle_count", "single_axle_count_duplicate",
-                      "tandem_axle_count", "tridem_axle_count", "quad_axle_count",
-                      "avg_gross_weight", "gross_weight_distribution", "avg_single_weight",
-                      "avg_tandem_weight", "avg_tridem_weight", "avg_quad_weight",
-                      "length_distribution", "avg_length", 
-                      "avg_tandem_spacing", "avg_tridem_spacing", "avg_quad_spacing",
-                      "avg_wheelbase", "wheelbase_distribution", "total_flex_esal_300",
-                      "total_flex_esal_285", "total_rigid_esal_300", "total_rigid_esal_285"
-) 
+col_names_vc <- c("time", "station_ID", "substation_ID", "freeway_ID", 
+                  "freeway_direction", "city_ID", "county_ID", "district_ID",
+                  "abs_postmile", "station_type", "station_set_ID", "total_flow",
+                  "samples","class_1", "class_2", "class_3", "class_4", "class_5",
+                  "class_6", "class_7", "class_8", "class_9", "class_10", "class_11",
+                  "class_12", "class_13", "class_14", "class_15") 
 
-col_types_census <- c(
-  time = "character", station_ID = "integer", substation_ID = "integer", freeway_ID = "character", 
-  freeway_direction = "character", city_ID = "character", county_ID = "character", district_ID = "integer",
-  abs_postmile = "numeric", station_type = "character", station_set_ID = "integer", lane = "integer", 
-  vehicle_class = "integer", vehicle_count = "integer", avg_speed = "numeric", violation_count = "integer",
-  violation_code = "character", single_axle_count = "integer", single_axle_count_duplicate = "integer",
-  tandem_axle_count = "integer", tridem_axle_count = "integer", quad_axle_count = "integer",
-  avg_gross_weight = "numeric", gross_weight_distribution = "character", avg_single_weight = "numeric",
-  avg_tandem_weight = "numeric", avg_tridem_weight = "numeric", avg_quad_weight = "numeric",
-  length_distribution = "numeric", avg_length = "character", 
-  avg_tandem_spacing = "numeric", avg_tridem_spacing = "numeric", avg_quad_spacing = "numeric",
-  avg_wheelbase = "numeric", wheelbase_distribution = "character", total_flex_esal_300 = "numeric",
-  total_flex_esal_285 = "numeric", total_rigid_esal_300 = "numeric", total_rigid_esal_285 = "numeric"
+col_types_vc <- c(
+  time = "character", station_ID = "integer", substation_ID = "integer", freeway_ID = "integer", 
+  freeway_direction = "character", city_ID = "integer", county_ID = "integer", district_ID = "integer",
+  abs_postmile = "numeric", station_type = "character", station_set_ID = "integer", 
+  total_flow = "int", samples = "integer", class_1 = "integer", class_2 = "integer",
+  class_3 = "integer", class_4 = "integer", class_5 = "integer", class_6 = "integer",
+  class_7 = "integer", class_8 = "integer", class_9 = "integer", class_10 = "integer",
+  class_11 = "integer", class_12 = "integer", class_13 = "integer", class_14 = "integer",
+  class_15 = "integer"
 )
 
 # ==============================================================================
 # Data Processing Function 
 # ==============================================================================
-start_year <- 2011
-end_year <- 2011
+start_year <- 2010
+end_year <- 2010
 ##############################################################################
 ## Imports, combines, and locates PeMS truck census data for a given period.
 ##############################################################################
 
 # Define Paths 
-census_data_dir <- here::here("data-raw", "traffic_census")
+census_data_dir <- here::here("data-raw", "census_VC")
 lrs_shapefile_path <- here::here("data-raw", "State_Highway_Network_Lines", "State_Highway_Network_Lines.shp")
 
 # Check Paths
@@ -170,7 +166,7 @@ if (!file.exists(lrs_shapefile_path)) stop("LRS shapefile not found: ", lrs_shap
 
 # Find Files
 all_txt_files <- list.files(path = census_data_dir, 
-                            pattern = "^all_text_tmg_trucks_hour_\\d{4}_\\d{2}_\\d{2}\\.txt$", 
+                            pattern = "^all_text_tmg_vclass_hour_\\d{4}_\\d{2}_\\d{2}\\.txt$", 
                             full.names = TRUE)
 if (length(all_txt_files) == 0) {
   warning("No PeMS .txt files found in: ", census_data_dir, ". Returning NULL for PeMS data.")
@@ -189,23 +185,14 @@ if (n_files == 0) {
 message("Found ", n_files, " PeMS files for ", start_year, "-", end_year, ".")
 
 # Import and Combine
-message("Importing and combining PeMS data...")
+message("Importing and combining PeMS census VC data...")
 pb_read <- progress_bar$new(format = "  Reading PeMS census [:bar] :percent eta: :eta (:file)", total = n_files, clear = FALSE, width = 60)
 
 
 all_data_list <- lapply(files_to_process, function(f) {
   pb_read$tick(tokens = list(file = basename(f)))
   tryCatch({
-    # Note that some files are not consistently formatted
-    # different observations have different number of columns
-    # It is mysterious what the columns beyond the first 39's are 
-    # but we will not be using them anyway
-    # the first 39 cols looks good!
-    
-    # Strategy:
-    # We use fill = Inf to force fread to read the entire file first
-    # to find the maximum number of columns, preventing errors on long lines.
-    # we will only keep the first 39 columns.
+
       dt_raw <- fread(f,
                       sep = ",",
                       header = FALSE, # Assume no header
@@ -221,36 +208,26 @@ all_data_list <- lapply(files_to_process, function(f) {
       }
       
       
-      # Select only the first 39 columns 
-      dt <- dt_raw[, 1:39]
+      # Select only the first 28 columns 
+      dt <- dt_raw[, 1:28]
       
       # Assign the correct column names
-      setnames(dt, col_names_census)
+      setnames(dt, col_names_vc)
       
-      # Apply the correct data types
-      # Convert ID columns safely first
-      id_cols <- c("station_ID", "substation_ID", "station_set_ID")
-      for(col in id_cols) {
-        # Use suppressWarnings for potential NAs introduced by coercion
-        dt[, (col) := suppressWarnings(as.integer(get(col)))]
-      }
-      
-      # Apply other types using the col_types_census list
-      for(col in names(col_types_census)) {
-        if (col %in% names(dt) && !(col %in% id_cols)) { # Avoid re-converting IDs
-          target_type <- col_types_census[[col]]
+      # Apply types using the col_types_vc list
+      for(col in names(col_types_vc)) {
+          target_type <- col_types_vc[[col]]
           # Use suppressWarnings for potential NAs introduced by coercion
           if(target_type == "integer") dt[, (col) := suppressWarnings(as.integer(get(col)))]
           if(target_type == "numeric") dt[, (col) := suppressWarnings(as.numeric(get(col)))]
           # Character columns are likely already character, but explicitly ensure
           if(target_type == "character") dt[, (col) := as.character(get(col))]
-        }
       }
       
-      # Select only the columns needed for the final output
-      dt[, .(time, station_ID, substation_ID, freeway_ID, freeway_direction,
-             city_ID, county_ID, district_ID, abs_postmile, station_type,
-             station_set_ID, lane, vehicle_class, vehicle_count)]
+      # We will not need this column
+      dt[, samples := NULL]
+      # remove observations with 0 total traffic flow
+      dt <- dt[total_flow != 0]
       
     }, error = function(e) {
     warning("Error reading PeMS file: ", basename(f), " - ", e$message, call. = FALSE)
@@ -265,9 +242,9 @@ if (nrow(combined_data) == 0) {
 }
 message("PeMS data import complete. Total rows: ", nrow(combined_data))
 
-# In 2011 data, two substations (8878001 and 8878005) have freeway_ID = 944
-# I believe this is a sloppy entry, there is no highway 944
-# They are also not freeway_ID = 94 (wichih run west - east). since data say are NB or SB
+# Some observations have undocumented freeway ID
+# For example, in 2011 data, two substations (8878001 and 8878005) have freeway_ID = 944
+# There is no highway 944
 # Lack of meta data, we are unable to locate them
 # SO we delete them from our data
 
@@ -280,12 +257,12 @@ if (removed_rows > 0) {
 
 # Identify Unique Locations 
 message("Identifying unique PeMS substations...")
-combined_data[, abs_postmile := as.numeric(abs_postmile)] 
+
 unique_substations <- combined_data %>%
   filter(!is.na(substation_ID), !is.na(freeway_ID), !is.na(freeway_direction), !is.na(abs_postmile), abs_postmile >= 0) %>% # Add check for non-negative postmile
   distinct(substation_ID, station_ID, freeway_ID, freeway_direction, abs_postmile) %>%
   as.data.table()
-message("Found ", nrow(unique_substations), " unique PeMS substation locations.")
+message("Found ", nrow(unique_substations), " unique PeMS VC substation locations.")
 
 if (nrow(unique_substations) == 0) {
   warning("No valid unique substations found to locate.")
@@ -307,17 +284,16 @@ lrs <- tryCatch({
 })
 
 if (is.null(lrs)) {
-  warning("Cannot locate PeMS stations because LRS file failed to load.")
+  warning("Cannot locate PeMS VC stations because LRS file failed to load.")
   combined_data[, `:=`(Latitude = as.numeric(NA), Longitude = as.numeric(NA))]
   return(combined_data) # Return data without coordinates
 }
 message("LRS data loaded.")
 
 # Find Coordinates
-message("Calculating PeMS coordinates...")
+message("Calculating PeMS VC substation coordinates...")
 pb_loc <- progress_bar$new(format = "  Locating PeMS [:bar] :percent eta: :eta", total = nrow(unique_substations), clear = FALSE, width=60)
 
-# Wrap lapply in tryCatch in case of widespread errors in get_point_from_lrs
 coordinates_list <- tryCatch({
   lapply(split(unique_substations, seq(nrow(unique_substations))), function(row_dt) {
     pb_loc$tick()
@@ -327,6 +303,7 @@ coordinates_list <- tryCatch({
   warning("Error during coordinate calculation loop: ", e$message, call. = FALSE)
   return(list()) # Return empty list on major error
 })
+
 
 # Filter out NULLs more safely
 valid_coordinates_list <- Filter(function(x) !is.null(x) && nrow(x) > 0, coordinates_list)
@@ -370,14 +347,18 @@ if (na_coords > 0) {
 }
 
 desired_order <- c(
-  "district_ID", "city_ID", "county_ID", "station_set_ID", "station_ID", 
-  "substation_ID", "station_type", "Latitude", "Longitude", "time", 
-  "freeway_ID", "freeway_direction", "lane", "abs_postmile", 
-  "vehicle_class", "vehicle_count"
+  "district_ID", "city_ID", "county_ID", "station_set_ID", "station_ID","station_type",
+  "substation_ID","Latitude", "Longitude", "time", "freeway_ID", "freeway_direction", 
+  "abs_postmile", "total_flow" ,"class_1", "class_2", "class_3", "class_4", "class_5", "class_6",          
+  "class_7", "class_8", "class_9", "class_10", "class_11", "class_12",         
+  "class_13", "class_14", "class_15"    
 )
 
 setcolorder(final_pems_data, desired_order)
 
+final_pems_data <- final_pems_data[!is.na(Latitude) & !is.na(Longitude)]
+
+summary(final_pems_data)
 
 # ==============================================================================
 # CARB Air Quality and Meteorological Information System data
