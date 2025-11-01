@@ -207,3 +207,7 @@ Observation with multiple LRS segments or relevant LINESTRING are removed. (deal
 CA State Highway Network linear referencing system (LRS)
 https://gisdata-caltrans.opendata.arcgis.com/datasets/77f2d7ba94e040a78bfbe36feb6279da_0/about
 
+# Note that we are currently using this LRS for all years traffic data.
+# Change this in the future versions if possible.
+
+

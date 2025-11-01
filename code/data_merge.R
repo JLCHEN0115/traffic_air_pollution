@@ -12,18 +12,18 @@ pacman::p_load(
 ################################################################################
 # Match the PEMS traffic census monitors and the CARB NOx monitors
 ################################################################################
-nox_file <- here::here("data-clean", "nox_2011.csv")
-pems_file <- here::here("data-clean", "pems_census_2011.csv") 
+nox_file <- here::here("data-clean", "nox_2010.csv")
+pems_file <- here::here("data-clean", "pems_census_VC_2010.csv") 
 
 message("Loading NOx data...")
-nox_2011_dt <- fread(nox_file)
+nox_dt <- fread(nox_file)
 
 message("Loading PeMS census data...")
-pems_census_2011_dt <- fread(pems_file)
-message("PeMS census data loaded with ", nrow(pems_census_2011_dt), " rows.")
+pems_dt <- fread(pems_file)
+message("PeMS census data loaded with ", nrow(pems_dt), " rows.")
 
 # ==========================================
-# # Verify Lane 0  is the sum of other lanes
+# # For Census Truck data: Verify Lane 0  is the sum of other lanes
 # ==========================================
 # message("Verifying Lane 0 counts...")
 # # Group by substation, time, and class, then sum counts for lane 0 and others
@@ -48,12 +48,12 @@ message("PeMS census data loaded with ", nrow(pems_census_2011_dt), " rows.")
 # }
 
 
-message("Filtering PeMS data for Lane 0...")
-# This creates a new data.table containing only lane 0 rows
-pems_lane0_dt <- pems_census_2011_dt[lane == 0]
-message("Filtered data contains ", nrow(pems_lane0_dt), " rows (Lane 0 only).")
-
-message("Ready for matching PeMS and NOx data.")
+# message("Filtering PeMS data for Lane 0...")
+# # This creates a new data.table containing only lane 0 rows
+# pems_lane0_dt <- pems_census_2011_dt[lane == 0]
+# message("Filtered data contains ", nrow(pems_lane0_dt), " rows (Lane 0 only).")
+# 
+# message("Ready for matching PeMS and NOx data.")
 
 # ===========================
 #  Matching PeMS and NOx data
@@ -64,7 +64,7 @@ message("\n--- Starting PeMS to NOx Matching ---")
 # Prepare NOx Data 
 message("Preparing NOx monitor data...")
 # Convert nox_2011_dt to data.table if it's not already
-if (!is.data.table(nox_2011_dt)) {
+if (!is.data.table(nox_dt)) {
   nox_2011_dt <- as.data.table(nox_2011_dt)
   message("Converted nox_2011_dt to data.table.")
 }
@@ -72,13 +72,13 @@ if (!is.data.table(nox_2011_dt)) {
 # Create unique NOx monitor locations sf object
 # Ensure lat/lon columns exist and are numeric
 nox_coord_cols <- c("latitude", "longitude")
-if (!all(nox_coord_cols %in% names(nox_2011_dt))) {
+if (!all(nox_coord_cols %in% names(nox_dt))) {
   stop("NOx data is missing required 'latitude' or 'longitude' columns.")
 }
 # Convert safely, coercing errors to NA
-nox_2011_dt[, (nox_coord_cols) := lapply(.SD, function(x) suppressWarnings(as.numeric(x))), .SDcols = nox_coord_cols]
+nox_dt[, (nox_coord_cols) := lapply(.SD, function(x) suppressWarnings(as.numeric(x))), .SDcols = nox_coord_cols]
 
-nox_sites_sf <- nox_2011_dt[!is.na(latitude) & !is.na(longitude), # Filter out missing coords
+nox_sites_sf <- nox_dt[!is.na(latitude) & !is.na(longitude), # Filter out missing coords
                             .(site = first(site), # Keep first site ID if duplicate coords exist
                               Latitude = first(latitude), 
                               Longitude = first(longitude)
@@ -91,7 +91,7 @@ if (nrow(nox_sites_sf) == 0) {
 message("Prepared ", nrow(nox_sites_sf), " unique NOx monitor locations.")
 
 # Prepare full NOx data for merging later (rename cols, create date/hour)
-nox_merge_ready_dt <- nox_2011_dt[variable == "NOX", # Assuming you only want NOX
+nox_merge_ready_dt <- nox_dt[variable == "NOX", 
                                   .(site, 
                                     nox_date = as.Date(date), # Convert date string to Date
                                     nox_hour = as.integer(start_hour), # Ensure hour is integer
@@ -105,20 +105,21 @@ message("Prepared NOx data for time merging.")
 
 # Prepare PeMS Data 
 message("Preparing PeMS substation data...")
-# Check if pems_lane0_dt exists and has rows
-if (!exists("pems_lane0_dt") || is.null(pems_lane0_dt) || nrow(pems_lane0_dt) == 0) {
-  stop("PeMS Lane 0 data ('pems_lane0_dt') not found or is empty.")
+# Check if data exists and has rows
+if (!exists("pems_dt") || is.null(pems_dt) || nrow(pems_dt) == 0) {
+  stop("PeMS data ('pems_dt') not found or is empty.")
 }
 # Check for required columns
 pems_req_cols <- c("substation_ID", "Latitude", "Longitude", "time")
-if (!all(pems_req_cols %in% names(pems_lane0_dt))) {
-  stop("PeMS data is missing required columns: ", paste(setdiff(pems_req_cols, names(pems_lane0_dt)), collapse=", "))
+if (!all(pems_req_cols %in% names(pems_dt))) {
+  stop("PeMS data is missing required columns: ", paste(setdiff(pems_req_cols, names(pems_dt)), collapse=", "))
 }
 
 # Create unique PeMS substation locations sf object
-pems_sites_sf <- pems_lane0_dt[!is.na(Latitude) & !is.na(Longitude), # Filter out missing coords
-                               .(substation_ID = first(substation_ID)), # Keep first ID if duplicate coords
-                               by = .(Latitude, Longitude)] %>%
+pems_sites_sf <- pems_dt[!is.na(Latitude) & !is.na(Longitude), # Filter out missing coords
+                               .(Latitude, Longitude),
+                         by = "substation_ID"] %>% 
+  unique() %>%
   st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326) # Create sf object (WGS84)
 
 if (nrow(pems_sites_sf) == 0) {
@@ -128,7 +129,7 @@ message("Prepared ", nrow(pems_sites_sf), " unique PeMS substation locations wit
 
 
 # Find Nearest NOx Monitor for each PeMS Substation 
-message("Calculating nearest NOx monitor for each PeMS substation...")
+message("Calculating nearest NOx monitor for each PeMS VC substation...")
 
 # Add progress bar for nearest neighbor calculation
 n_pems_sites <- nrow(pems_sites_sf)
@@ -169,11 +170,11 @@ message("Nearest neighbor calculation complete.")
 message("Preparing PeMS data time components...")
 # Parse PeMS timestamp (MM/DD/YYYY HH:MM:SS)
 # Use data.table's fast parsing `as.IDate` and `hour`
-pems_lane0_dt[, pems_datetime := mdy_hms(time, tz = "UTC", quiet = TRUE)] # Parse full timestamp safely
-pems_lane0_dt <- pems_lane0_dt[!is.na(pems_datetime)] # Remove rows where parsing failed
+pems_dt[, pems_datetime := mdy_hms(time, tz = "UTC", quiet = TRUE)] # Parse full timestamp safely
+pems_dt <- pems_dt[!is.na(pems_datetime)] # Remove rows where parsing failed
 
 # Extract Date and Hour components
-pems_lane0_dt[, `:=`(
+pems_dt[, `:=`(
   pems_date = as.IDate(pems_datetime), # Fast date conversion
   pems_hour = hour(pems_datetime)      # Extract hour (0-23)
 )]
@@ -183,11 +184,11 @@ message("PeMS time components extracted.")
 # Merge Nearest Neighbor Info into PeMS Data
 message("Merging nearest monitor info into PeMS data...")
 # Ensure substation_ID types match before merge
-pems_lane0_dt[, substation_ID := as.integer(substation_ID)]
+pems_dt[, substation_ID := as.integer(substation_ID)]
 pems_nearest_map_dt[, substation_ID := as.integer(substation_ID)]
 
 # Merge using data.table 
-pems_with_nearest_dt <- merge(pems_lane0_dt, 
+pems_with_nearest_dt <- merge(pems_dt, 
                               pems_nearest_map_dt[, .(substation_ID, nearest_nox_site, distance_m)], 
                               by = "substation_ID", 
                               all.x = TRUE) # Keep all PeMS rows
@@ -209,8 +210,10 @@ final_merged_dt <- merge(pems_with_nearest_dt,
                          all.x = TRUE)
 
 # Rename the merged NOx value column
-setnames(final_merged_dt, "NOx_value", "NOx_nearest", skip_absent = TRUE)
+setnames(final_merged_dt, "NOx_value", "NOx_nearest_value", skip_absent = TRUE)
 message("Final merge complete. Result has ", nrow(final_merged_dt), " rows.")
+
+
 
 # Clean up and Final Result 
 # Remove intermediate columns 
@@ -221,32 +224,34 @@ meters_to_miles_factor <- 0.000621371
 final_merged_dt[, distance_miles := distance_m * meters_to_miles_factor]
 final_merged_dt[, distance_m := NULL]
 
+# filter the observations that do not have Nox number in the nearest site
+final_merged_dt <- final_merged_dt[!is.na(NOx_nearest_value)]
+
+
 # View the structure and head of the final merged data
 message("Final Merged Data Structure:")
 str(final_merged_dt)
 message("Final Merged Data Head:")
 print(head(final_merged_dt)) # Now includes distance_miles
-
 message("\n--- PeMS STATION to NOx Matching Complete ---")
+summary(final_merged_dt)
+
 
 # The final result is in the data.table 'final_merged_dt'
 # It contains your aggregated PeMS station data, plus:
 # - nearest_nox_site: The site ID of the closest NOx monitor
-# - distance_m: The distance (in meters) to that monitor (if not removed)
+# - distance_m: The distance (in meters) to that monitor 
 # - distance_miles: The distance (in miles) to that monitor
-# - NOx_nearest: The NOx value from that monitor for the matching hour (NA if no match)
+# - NOx_nearest: The NOx value from that monitor for the matching hour 
 
-summary(final_merged_dt$distance_miles)
-
-
-
+# fwrite(final_merged_dt, here("data-clean", "VC_nox_merged_2010.csv"), row.names = FALSE)
 
 
 
 # Mapview of monitor locations 
 # Add a 'type' column to each sf object
 pems_map_data <- pems_sites_sf
-pems_map_data$type <- "PeMS Station" # Assign a category label
+pems_map_data$type <- "PeMS census VC Station" # Assign a category label
 
 nox_map_data <- nox_sites_sf
 nox_map_data$type <- "NOx Monitor"   # Assign a category label
@@ -262,11 +267,3 @@ mapview(pems_map_data,
 
 
 
-
-
-
-
-
-
-
-  

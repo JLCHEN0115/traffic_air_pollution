@@ -58,24 +58,22 @@ get_point_from_lrs <- function(station_info, lrs_data) {
       #       Direction == direction,
       #       abs(bOdometer - target_apm) < 0.001 | abs(eOdometer - target_apm) < 0.001)
     
-    if (nrow(seg) == 0) {
-       warning(paste("No LRS segment found for substation:", station_info$substation_ID,
+    # if (nrow(seg) == 0) {
+      warning(paste("No LRS segment found for substation:", station_info$substation_ID,
                      "Route:", route, "APM:", target_apm, "Dir:", direction), " - giving NULL")
       return(NULL)
-    } else {
-      # If multiple boundary matches, take the first one
-      # seg <- seg %>% slice(1)
+    # } else {
       # Fraction is 0 if matching start, 1 if matching end
-      frac <- ifelse(abs(target_apm - seg$bOdometer) < 0.001, 0, 1)
-    }
+      # frac <- ifelse(abs(target_apm - seg$bOdometer) < 0.001, 0, 1)
+    # }
   } else {
     # If multiple overlapping segments, take the first one
     if (nrow(seg) > 1) {
-      # Reduced warning frequency
-       warning(paste("Multiple LRS segments found for substation:", station_info$substation_ID, 
+      warning(paste("Multiple LRS segments found for substation:", station_info$substation_ID, 
                     "- giving NULL."))
       return(NULL)
     }
+    
     # Calculate fraction along the segment
     denominator <- seg$eOdometer - seg$bOdometer
     # Avoid division by zero if segment length is zero
@@ -99,7 +97,7 @@ get_point_from_lrs <- function(station_info, lrs_data) {
     return(NULL) 
   }
   
-  # Use tryCatch for st_line_sample issues like invalid fraction
+  # sample the point given fraction in that relevant segment
   pt <- tryCatch({
     # Ensure frac is valid before sampling
     if (!is.finite(frac) || frac < 0 || frac > 1) {
@@ -226,7 +224,7 @@ all_data_list <- lapply(files_to_process, function(f) {
       
       # We will not need this column
       dt[, samples := NULL]
-      # remove observations with 0 total traffic flow
+      # remove observations with 0 total traffic flow (bad quality)
       dt <- dt[total_flow != 0]
       
     }, error = function(e) {
@@ -305,7 +303,7 @@ coordinates_list <- tryCatch({
 })
 
 
-# Filter out NULLs more safely
+# Filter out NULLs
 valid_coordinates_list <- Filter(function(x) !is.null(x) && nrow(x) > 0, coordinates_list)
 
 if (length(valid_coordinates_list) == 0) {
@@ -360,12 +358,17 @@ final_pems_data <- final_pems_data[!is.na(Latitude) & !is.na(Longitude)]
 
 summary(final_pems_data)
 
+# fwrite(final_pems_data,
+#        here("data-clean", "pems_census_VC_2010.csv"),
+#        row.names = FALSE,
+#        showProgress = TRUE)
+
 # ==============================================================================
 # CARB Air Quality and Meteorological Information System data
 # ==============================================================================
 path <- here::here("data-raw", "CARB_AQMIS2_NOx")
-start_year <- 2011
-end_year <- 2011
+start_year <- 2010
+end_year <- 2010
 years_to_match <- seq(start_year, end_year)
 
 # Create a regex pattern from those years
@@ -384,7 +387,7 @@ nox_files <- list.files(path = path,
 
 all_hourly_data <- map(nox_files, ~ read_csv(., show_col_types = FALSE)) %>%
                    list_rbind() # There will be warnings because each of the data
-                                # file has some notes about "Quality Flag Definition"
+                                # file has some notes in the end about "Quality Flag Definition"
                                 # that do not match the previous rows' pattern. 
                                 # Don't worry about it.
 
@@ -427,12 +430,10 @@ nox_site_locations <- all_sitelist_data %>%
 nox_data <- dplyr::left_join(all_hourly_data, nox_site_locations, by = "site")
 
 
-################################################################################
-#  Data export
-################################################################################
 
-# fwrite(nox_data, here("data-clean", "nox_2011.csv"), row.names = FALSE)
-# fwrite(final_pems_data, here("data-clean", "pems_census_2011.csv"), row.names = FALSE)
+##  Data export
+# fwrite(nox_data, here("data-clean", "nox_2010.csv"), row.names = FALSE)
+
 
 
 
